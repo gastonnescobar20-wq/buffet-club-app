@@ -134,6 +134,9 @@
     const user = await requireAuth(["admin", "cajera"]);
     if (!user) throw new Error("sin sesión");
 
+    const ETIQUETA_CANAL = { mostrador: "Mostrador", mesa: "Mesa", telefono: "Teléfono", whatsapp: "WhatsApp", rappi: "Rappi", pedidos_ya: "PedidosYa", delivery_propio: "Delivery propio" };
+    const ICONO_CANAL = { mostrador: "🧾", mesa: "🍽️", telefono: "📞", whatsapp: "💬", rappi: "🛵", pedidos_ya: "🛵", delivery_propio: "🚗" };
+
     let turno = null;
     let pedidoSeleccionado = null; // para el modal de cobro/anulación
 
@@ -190,11 +193,11 @@
 
       tbody.innerHTML = pedidos
         .map((p) => {
-          const origen = p.canal === "mesa" && p.mesas ? `Mesa ${p.mesas.numero}` : (p.cliente_nombre ? `${p.canal} · ${escapeHtml(p.cliente_nombre)}` : p.canal);
+          const origen = p.canal === "mesa" && p.mesas ? `Mesa ${p.mesas.numero}` : (p.cliente_nombre ? `${ETIQUETA_CANAL[p.canal] || p.canal} · ${escapeHtml(p.cliente_nombre)}` : ETIQUETA_CANAL[p.canal] || p.canal);
           const total = (p.pedido_items || []).filter((it) => !it.anulado).reduce((acc, it) => acc + it.cantidad * it.precio_unitario - it.descuento, 0);
           return `
           <tr>
-            <td>${origen}</td>
+            <td><span class="canal-badge ${p.canal}">${ICONO_CANAL[p.canal] || "🧾"}</span> ${origen}</td>
             <td><span class="badge badge-${p.estado}">${p.estado.replace("_", " ")}</span></td>
             <td class="mono tabular">$${fmt(total)}</td>
             <td style="white-space:nowrap;">

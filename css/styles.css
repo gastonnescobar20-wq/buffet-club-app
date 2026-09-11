@@ -126,6 +126,20 @@ main{
 .btn-sm{padding:5px 10px; font-size:0.8rem;}
 .btn-block{width:100%; justify-content:center;}
 
+/* insignias de canal (Rappi, PedidosYa, etc.), con el color propio de cada uno */
+.canal-badge{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:26px; height:26px; border-radius:50%; font-size:14px; flex:none;
+  line-height:1;
+}
+.canal-badge.mostrador{background:var(--brass-bg);}
+.canal-badge.telefono{background:var(--slate-bg);}
+.canal-badge.whatsapp{background:#DCF5E3;}
+.canal-badge.rappi{background:#FFE4DB;}
+.canal-badge.pedidos_ya{background:#FBDCE1;}
+.canal-badge.delivery_propio{background:var(--olive-bg);}
+.canal-badge.mesa{background:var(--brass-bg);}
+
 /* forms */
 label{font-size:0.82rem; color:var(--ink-soft); display:block; margin-bottom:4px;}
 input, select, textarea{

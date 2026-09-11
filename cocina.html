@@ -64,7 +64,8 @@
 
     const SIGUIENTE_ESTADO = { en_preparacion: "listo", listo: "entregado" };
     const ETIQUETA_BOTON = { en_preparacion: "Marcar listo", listo: "Marcar entregado" };
-    const ETIQUETA_CANAL = { mostrador: "Mostrador", mesa: "Mesa", telefono: "Teléfono", whatsapp: "WhatsApp", rappi: "Rappi" };
+    const ETIQUETA_CANAL = { mostrador: "Mostrador", mesa: "Mesa", telefono: "Teléfono", whatsapp: "WhatsApp", rappi: "Rappi", pedidos_ya: "PedidosYa", delivery_propio: "Delivery propio" };
+    const ICONO_CANAL = { mostrador: "🧾", mesa: "🍽️", telefono: "📞", whatsapp: "💬", rappi: "🛵", pedidos_ya: "🛵", delivery_propio: "🚗" };
 
     async function cargarComandas() {
       const { data: pedidos, error } = await supabase
@@ -93,6 +94,7 @@
               <span class="hora">${new Date(p.creado_at).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</span>
             </div>
             <div class="comanda-sub">
+              <span class="canal-badge ${p.canal}">${ICONO_CANAL[p.canal] || "🧾"}</span>
               <span class="canal">${etiquetaCanal}</span>
               ${p.cliente_nombre ? `<span class="cliente">${escapeHtml(p.cliente_nombre)}</span>` : ""}
             </div>
