@@ -64,6 +64,7 @@ create table public.productos (
   nombre text not null,
   categoria text not null default 'General',
   precio numeric(10,2) not null check (precio >= 0),
+  precio_docena numeric(10,2) check (precio_docena is null or precio_docena >= 0), -- para vender por docena (ej. empanadas)
   activo boolean not null default true,
   creado_at timestamptz not null default now()
 );
@@ -92,7 +93,7 @@ create table public.pedidos (
   numero bigint generated always as identity, -- número de orden corto, para mostrar en cocina
   canal text not null check (canal in ('mostrador','mesa','telefono','whatsapp','rappi','pedidos_ya','delivery_propio')),
   mesa_id uuid references public.mesas(id),
-  usuario_id uuid not null references public.usuarios(id), -- quién lo tomó
+  usuario_id uuid references public.usuarios(id), -- quién lo tomó; null = pedido cargado por el cliente desde el QR de la mesa
   turno_id uuid references public.turnos_caja(id), -- se asigna al cobrar
   estado text not null default 'abierto'
     check (estado in ('abierto','en_preparacion','listo','entregado','cobrado','anulado')),

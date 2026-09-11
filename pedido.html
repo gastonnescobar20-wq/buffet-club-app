@@ -138,7 +138,7 @@
     async function cargarMenu() {
       const { data, error } = await supabase
         .from("productos")
-        .select("id, nombre, categoria, precio")
+        .select("id, nombre, categoria, precio, precio_docena")
         .eq("activo", true)
         .order("categoria")
         .order("nombre");
@@ -160,7 +160,11 @@
           <div style="display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--line);">
             <span style="flex:1;">${p.nombre}</span>
             <span class="mono tabular" style="color:var(--ink-soft);">$${formatoMoneda(p.precio)}</span>
-            <button class="btn btn-sm" data-agregar="${p.id}">+ Agregar</button>
+            <button class="btn btn-sm" data-agregar="${p.id}" data-variante="unidad">+ Unidad</button>
+            ${p.precio_docena ? `
+              <span class="mono tabular" style="color:var(--ink-soft);">docena $${formatoMoneda(p.precio_docena)}</span>
+              <button class="btn btn-sm btn-olive" data-agregar="${p.id}" data-variante="docena">+ Docena</button>
+            ` : ""}
           </div>`
           )
           .join("")}
@@ -169,24 +173,33 @@
         .join("");
 
       cont.querySelectorAll("[data-agregar]").forEach((btn) => {
-        btn.addEventListener("click", () => agregarAlCarrito(btn.getAttribute("data-agregar")));
+        btn.addEventListener("click", () => agregarAlCarrito(btn.getAttribute("data-agregar"), btn.getAttribute("data-variante")));
       });
     }
 
-    function agregarAlCarrito(productoId) {
+    function agregarAlCarrito(productoId, variante) {
       const p = productos.find((x) => x.id === productoId);
       if (!p) return;
-      const existente = carrito.find((it) => it.producto_id === productoId);
+      const esDocena = variante === "docena";
+      const key = productoId + "|" + variante;
+      const existente = carrito.find((it) => it.key === key);
       if (existente) existente.cantidad += 1;
-      else carrito.push({ producto_id: p.id, nombre_producto: p.nombre, precio_unitario: p.precio, cantidad: 1 });
+      else
+        carrito.push({
+          key,
+          producto_id: p.id,
+          nombre_producto: esDocena ? `${p.nombre} (docena)` : p.nombre,
+          precio_unitario: esDocena ? p.precio_docena : p.precio,
+          cantidad: 1,
+        });
       render();
     }
 
-    function cambiarCantidad(productoId, delta) {
-      const it = carrito.find((x) => x.producto_id === productoId);
+    function cambiarCantidad(key, delta) {
+      const it = carrito.find((x) => x.key === key);
       if (!it) return;
       it.cantidad += delta;
-      if (it.cantidad <= 0) carrito = carrito.filter((x) => x.producto_id !== productoId);
+      if (it.cantidad <= 0) carrito = carrito.filter((x) => x.key !== key);
       render();
     }
 
@@ -229,8 +242,8 @@
             <td>${it.nombre_producto}</td>
             <td class="mono tabular">${it.cantidad}</td>
             <td>
-              <button class="btn btn-sm btn-ghost" data-menos="${it.producto_id}">−</button>
-              <button class="btn btn-sm btn-ghost" data-mas="${it.producto_id}">+</button>
+              <button class="btn btn-sm btn-ghost" data-menos="${it.key}">−</button>
+              <button class="btn btn-sm btn-ghost" data-mas="${it.key}">+</button>
             </td>
             <td class="mono tabular">$${formatoMoneda(it.cantidad * it.precio_unitario)}</td>
           </tr>`

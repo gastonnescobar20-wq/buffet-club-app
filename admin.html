@@ -29,8 +29,31 @@
           <form id="form-producto" class="grid grid-2" style="align-items:end; margin-bottom:18px;">
             <input type="hidden" id="prod-id" />
             <div class="field"><label>Nombre</label><input type="text" id="prod-nombre" required /></div>
-            <div class="field"><label>Categoría</label><input type="text" id="prod-categoria" placeholder="Parrilla, Pastas, Bebidas..." required /></div>
-            <div class="field"><label>Precio</label><input type="number" id="prod-precio" min="0" step="0.01" required /></div>
+            <div class="field">
+              <label>Categoría</label>
+              <select id="prod-categoria">
+                <option value="Entradas">Entradas</option>
+                <option value="Empanadas">Empanadas</option>
+                <option value="Picadas">Picadas</option>
+                <option value="Ensaladas">Ensaladas</option>
+                <option value="Parrilla">Parrilla</option>
+                <option value="Pastas">Pastas</option>
+                <option value="Pizzas">Pizzas</option>
+                <option value="Sandwiches">Sandwiches</option>
+                <option value="Guarniciones">Guarniciones</option>
+                <option value="Postres">Postres</option>
+                <option value="Bebidas">Bebidas</option>
+                <option value="Menú infantil">Menú infantil</option>
+                <option value="Merienda">Merienda</option>
+                <option value="otra">Otra (escribir)...</option>
+              </select>
+            </div>
+            <div class="field" id="campo-categoria-otra" hidden><label>¿Cuál?</label><input type="text" id="prod-categoria-otra" /></div>
+            <div class="field"><label>Precio (por unidad)</label><input type="text" inputmode="decimal" id="prod-precio" placeholder="Ej: 15.000" required /></div>
+            <div class="field">
+              <label><input type="checkbox" id="prod-vende-docena" /> También se vende por docena</label>
+              <input type="text" inputmode="decimal" id="prod-precio-docena" placeholder="Precio de la docena, ej: 9.000" hidden style="margin-top:6px;" />
+            </div>
             <div style="display:flex; gap:8px;">
               <button type="submit" class="btn btn-primary" id="prod-submit">Agregar producto</button>
               <button type="button" class="btn btn-ghost" id="prod-cancelar" hidden>Cancelar</button>
@@ -38,7 +61,7 @@
           </form>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Estado</th><th></th></tr></thead>
+              <thead><tr><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Docena</th><th>Estado</th><th></th></tr></thead>
               <tbody id="lista-productos"></tbody>
             </table>
           </div>
@@ -107,6 +130,32 @@
       });
     });
 
+    // ---- Precios: formato "15.000" a medida que se escribe ----
+    // Guarda solo dígitos y les pone puntos de miles; parsePeso hace el camino inverso.
+    function formatearPesoInput(input) {
+      input.addEventListener("input", () => {
+        const digitos = input.value.replace(/\D/g, "");
+        input.value = digitos ? Number(digitos).toLocaleString("es-AR") : "";
+      });
+    }
+    function parsePeso(str) {
+      const digitos = (str || "").replace(/\D/g, "");
+      return digitos ? Number(digitos) : null;
+    }
+    formatearPesoInput(document.getElementById("prod-precio"));
+    formatearPesoInput(document.getElementById("prod-precio-docena"));
+
+    // ---- Categoría "otra" ----
+    document.getElementById("prod-categoria").addEventListener("change", (e) => {
+      document.getElementById("campo-categoria-otra").hidden = e.target.value !== "otra";
+    });
+
+    // ---- Vende por docena ----
+    document.getElementById("prod-vende-docena").addEventListener("change", (e) => {
+      document.getElementById("prod-precio-docena").hidden = !e.target.checked;
+      if (!e.target.checked) document.getElementById("prod-precio-docena").value = "";
+    });
+
     // ---- Productos ----
     async function cargarProductos() {
       const { data } = await supabase.from("productos").select("*").order("categoria").order("nombre");
@@ -115,6 +164,7 @@
           (p) => `
         <tr>
           <td>${p.nombre}</td><td>${p.categoria}</td><td class="mono tabular">$${fmt(p.precio)}</td>
+          <td class="mono tabular">${p.precio_docena ? "$" + fmt(p.precio_docena) : "—"}</td>
           <td><span class="badge ${p.activo ? "badge-libre" : "badge-anulado"}">${p.activo ? "activo" : "inactivo"}</span></td>
           <td>
             <button class="btn btn-sm" data-editar-prod="${p.id}">Editar</button>
@@ -124,13 +174,25 @@
         )
         .join("");
 
+      const CATEGORIAS_FIJAS = [...document.getElementById("prod-categoria").options].map((o) => o.value);
+
       document.querySelectorAll("[data-editar-prod]").forEach((b) =>
         b.addEventListener("click", () => {
           const row = (data || []).find((p) => p.id === b.getAttribute("data-editar-prod"));
           document.getElementById("prod-id").value = row.id;
           document.getElementById("prod-nombre").value = row.nombre;
-          document.getElementById("prod-categoria").value = row.categoria;
-          document.getElementById("prod-precio").value = row.precio;
+          if (CATEGORIAS_FIJAS.includes(row.categoria)) {
+            document.getElementById("prod-categoria").value = row.categoria;
+            document.getElementById("campo-categoria-otra").hidden = true;
+          } else {
+            document.getElementById("prod-categoria").value = "otra";
+            document.getElementById("campo-categoria-otra").hidden = false;
+          }
+          document.getElementById("prod-categoria-otra").value = CATEGORIAS_FIJAS.includes(row.categoria) ? "" : row.categoria;
+          document.getElementById("prod-precio").value = Number(row.precio).toLocaleString("es-AR");
+          document.getElementById("prod-vende-docena").checked = !!row.precio_docena;
+          document.getElementById("prod-precio-docena").hidden = !row.precio_docena;
+          document.getElementById("prod-precio-docena").value = row.precio_docena ? Number(row.precio_docena).toLocaleString("es-AR") : "";
           document.getElementById("prod-submit").textContent = "Guardar cambios";
           document.getElementById("prod-cancelar").hidden = false;
         })
@@ -147,16 +209,24 @@
     function resetFormProducto() {
       document.getElementById("form-producto").reset();
       document.getElementById("prod-id").value = "";
+      document.getElementById("campo-categoria-otra").hidden = true;
+      document.getElementById("prod-precio-docena").hidden = true;
       document.getElementById("prod-submit").textContent = "Agregar producto";
       document.getElementById("prod-cancelar").hidden = true;
     }
     document.getElementById("form-producto").addEventListener("submit", async (e) => {
       e.preventDefault();
       const id = document.getElementById("prod-id").value;
+      const categoriaSel = document.getElementById("prod-categoria").value;
+      const categoria = categoriaSel === "otra" ? document.getElementById("prod-categoria-otra").value.trim() : categoriaSel;
+      if (!categoria) { toast("Escribí la categoría.", "error"); return; }
       const payload = {
         nombre: document.getElementById("prod-nombre").value.trim(),
-        categoria: document.getElementById("prod-categoria").value.trim(),
-        precio: Number(document.getElementById("prod-precio").value),
+        categoria,
+        precio: parsePeso(document.getElementById("prod-precio").value),
+        precio_docena: document.getElementById("prod-vende-docena").checked
+          ? parsePeso(document.getElementById("prod-precio-docena").value)
+          : null,
       };
       const { error } = id
         ? await supabase.from("productos").update(payload).eq("id", id)
@@ -176,7 +246,10 @@
         <tr>
           <td class="mono">${m.numero}</td>
           <td><span class="badge badge-${m.estado}">${m.estado}</span></td>
-          <td><button class="btn btn-sm btn-danger" data-borrar-mesa="${m.id}">Quitar</button></td>
+          <td style="white-space:nowrap;">
+            <a class="btn btn-sm" href="qr-mesa.html?mesaId=${m.id}&numero=${m.numero}" target="_blank">📱 QR</a>
+            <button class="btn btn-sm btn-danger" data-borrar-mesa="${m.id}">Quitar</button>
+          </td>
         </tr>`
         )
         .join("");

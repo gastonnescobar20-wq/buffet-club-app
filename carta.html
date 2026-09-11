@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carta — Buffet del club</title>
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .carta-shell{max-width:640px; margin:0 auto; padding:16px;}
+    .item-carta{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);}
+    .item-carta .nombre{flex:1;}
+    .item-carta .precio{color:var(--ink-soft); font-size:.85rem;}
+    .carrito-flotante{
+      position:sticky; bottom:0; background:var(--paper); border-top:1px solid var(--line-strong);
+      padding:12px 16px; margin:0 -16px; box-shadow:0 -2px 10px rgba(0,0,0,0.08);
+    }
+    .pantalla-exito{text-align:center; padding:40px 16px;}
+    .pantalla-exito .numero{font-size:3rem; font-weight:700; font-family:'IBM Plex Mono', monospace; color:var(--olive); margin:10px 0;}
+  </style>
+</head>
+<body>
+  <div class="carta-shell" id="app">
+    <p class="estado" style="text-align:center; padding:40px 0; color:var(--ink-soft);">Cargando la carta...</p>
+  </div>
+
+  <script type="module">
+    import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./js/config.js";
+
+    const mesaId = new URLSearchParams(window.location.search).get("mesa");
+    const app = document.getElementById("app");
+
+    if (!mesaId) {
+      app.innerHTML = `<p class="estado" style="text-align:center; padding:40px 0;">Falta el código de la mesa. Pedile ayuda a un mozo.</p>`;
+      throw new Error("sin mesaId");
+    }
+
+    async function llamarFuncion(payload) {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/pedido-qr`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: "Bearer " + SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify(payload),
+      });
+      return resp.json();
+    }
+
+    let productos = [];
+    let carrito = []; // { key, producto_id, nombre_producto, precio_unitario, cantidad }
+
+    async function cargar() {
+      const data = await llamarFuncion({ accion: "menu", mesaId });
+      if (data.error) {
+        app.innerHTML = `<p class="estado" style="text-align:center; padding:40px 0;">${escapeHtml(data.error)}</p>`;
+        return;
+      }
+      productos = data.productos;
+      render(data.mesaNumero, data.pedidoActual);
+    }
+
+    function render(mesaNumero, pedidoActual) {
+      const categorias = [...new Set(productos.map((p) => p.categoria))];
+      app.innerHTML = `
+        <div style="text-align:center; padding:18px 0;">
+          <h1 style="margin-bottom:2px;">🥩 Buffet del club</h1>
+          <p class="lede" style="margin:0;">Mesa ${mesaNumero}</p>
+        </div>
+
+        ${pedidoActual ? `
+          <div class="panel">
+            <h2>Ya pedido en esta mesa</h2>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Producto</th><th>Cant.</th><th>Subtotal</th></tr></thead>
+                <tbody>
+                  ${pedidoActual.items.map((it) => `<tr><td>${escapeHtml(it.nombre_producto)}</td><td>${it.cantidad}</td><td class="mono tabular">$${fmt(it.cantidad * it.precio_unitario)}</td></tr>`).join("")}
+                </tbody>
+              </table>
+            </div>
+            <p style="text-align:right; margin-top:8px;">Total pedido: <b class="mono tabular">$${fmt(pedidoActual.total)}</b></p>
+          </div>
+        ` : ""}
+
+        <div class="panel">
+          <h2>Carta</h2>
+          <p class="lede">Elegí lo que querés pedir. Se manda directo a cocina.</p>
+          ${categorias.map((cat) => `
+            <p class="mono" style="font-size:.72rem; text-transform:uppercase; color:var(--ink-soft); margin:14px 0 6px;">${escapeHtml(cat)}</p>
+            ${productos.filter((p) => p.categoria === cat).map((p) => `
+              <div class="item-carta">
+                <span class="nombre">${escapeHtml(p.nombre)}</span>
+                <span class="precio mono tabular">$${fmt(p.precio)}</span>
+                <button class="btn btn-sm" data-agregar="${p.id}" data-variante="unidad">+ Unidad</button>
+                ${p.precio_docena ? `
+                  <span class="precio mono tabular">doc. $${fmt(p.precio_docena)}</span>
+                  <button class="btn btn-sm btn-olive" data-agregar="${p.id}" data-variante="docena">+ Docena</button>
+                ` : ""}
+              </div>
+            `).join("")}
+          `).join("")}
+        </div>
+
+        <div class="panel">
+          <h2>Tu pedido nuevo</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th>Cant.</th><th></th><th>Subtotal</th></tr></thead>
+              <tbody id="carrito-lista"><tr><td colspan="4" class="empty-state">Todavía no agregaste nada</td></tr></tbody>
+            </table>
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label for="cliente-nombre">Tu nombre (opcional, para identificar el pedido)</label>
+            <input type="text" id="cliente-nombre" placeholder="Ej: Juan" />
+          </div>
+        </div>
+
+        <div class="carrito-flotante">
+          <p style="text-align:right; margin:0 0 8px;">Total: <b class="mono tabular" id="carrito-total">$0</b></p>
+          <button class="btn btn-primary btn-block" id="btn-confirmar" disabled>Enviar pedido a cocina</button>
+        </div>
+      `;
+
+      app.querySelectorAll("[data-agregar]").forEach((btn) => {
+        btn.addEventListener("click", () => agregar(btn.getAttribute("data-agregar"), btn.getAttribute("data-variante")));
+      });
+      document.getElementById("btn-confirmar").addEventListener("click", confirmar);
+      renderCarrito();
+    }
+
+    function agregar(productoId, variante) {
+      const p = productos.find((x) => x.id === productoId);
+      if (!p) return;
+      const esDocena = variante === "docena";
+      const key = productoId + "|" + variante;
+      const existente = carrito.find((it) => it.key === key);
+      if (existente) existente.cantidad += 1;
+      else
+        carrito.push({
+          key,
+          producto_id: p.id,
+          variante,
+          nombre_producto: esDocena ? `${p.nombre} (docena)` : p.nombre,
+          precio_unitario: esDocena ? p.precio_docena : p.precio,
+          cantidad: 1,
+        });
+      renderCarrito();
+    }
+
+    function cambiarCantidad(key, delta) {
+      const it = carrito.find((x) => x.key === key);
+      if (!it) return;
+      it.cantidad += delta;
+      if (it.cantidad <= 0) carrito = carrito.filter((x) => x.key !== key);
+      renderCarrito();
+    }
+
+    function renderCarrito() {
+      const tbody = document.getElementById("carrito-lista");
+      if (!tbody) return;
+      if (!carrito.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">Todavía no agregaste nada</td></tr>`;
+      } else {
+        tbody.innerHTML = carrito.map((it) => `
+          <tr>
+            <td>${escapeHtml(it.nombre_producto)}</td>
+            <td class="mono tabular">${it.cantidad}</td>
+            <td>
+              <button class="btn btn-sm btn-ghost" data-menos="${it.key}">−</button>
+              <button class="btn btn-sm btn-ghost" data-mas="${it.key}">+</button>
+            </td>
+            <td class="mono tabular">$${fmt(it.cantidad * it.precio_unitario)}</td>
+          </tr>
+        `).join("");
+        tbody.querySelectorAll("[data-mas]").forEach((b) => b.addEventListener("click", () => cambiarCantidad(b.getAttribute("data-mas"), 1)));
+        tbody.querySelectorAll("[data-menos]").forEach((b) => b.addEventListener("click", () => cambiarCantidad(b.getAttribute("data-menos"), -1)));
+      }
+      const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precio_unitario, 0);
+      document.getElementById("carrito-total").textContent = "$" + fmt(total);
+      document.getElementById("btn-confirmar").disabled = carrito.length === 0;
+    }
+
+    async function confirmar() {
+      const btn = document.getElementById("btn-confirmar");
+      btn.disabled = true;
+      btn.textContent = "Enviando...";
+      const data = await llamarFuncion({
+        accion: "crear",
+        mesaId,
+        clienteNombre: document.getElementById("cliente-nombre").value,
+        items: carrito.map((it) => ({ producto_id: it.producto_id, variante: it.variante, cantidad: it.cantidad })),
+      });
+      if (data.error) {
+        btn.disabled = false;
+        btn.textContent = "Enviar pedido a cocina";
+        alert(data.error);
+        return;
+      }
+      app.innerHTML = `
+        <div class="pantalla-exito">
+          <p style="font-size:2.5rem;">✅</p>
+          <p>¡Pedido enviado a cocina!</p>
+          <div class="numero">#${data.numero}</div>
+          <button class="btn btn-primary" id="btn-otra-vez">Pedir algo más</button>
+        </div>
+      `;
+      document.getElementById("btn-otra-vez").addEventListener("click", () => window.location.reload());
+    }
+
+    function fmt(n) { return Number(n).toLocaleString("es-AR", { minimumFractionDigits: 0 }); }
+    function escapeHtml(str) { const d = document.createElement("div"); d.textContent = str ?? ""; return d.innerHTML; }
+
+    await cargar();
+  </script>
+</body>
+</html>
