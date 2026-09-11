@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mesas y pedidos — Buffet</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="topbar-mount"></div>
+    <main>
+      <div class="panel">
+        <h2>Pedido rápido</h2>
+        <p class="lede">Para lo que no es una mesa: mostrador, teléfono/WhatsApp o lo que llega por Rappi.</p>
+        <div class="grid grid-2">
+          <a class="btn btn-primary btn-block" href="pedido.html?canal=mostrador">🧾 Mostrador / para llevar</a>
+          <a class="btn btn-block" href="pedido.html?canal=telefono">📞 Pedido por teléfono</a>
+          <a class="btn btn-block" href="pedido.html?canal=whatsapp">💬 Pedido por WhatsApp</a>
+          <a class="btn btn-block" href="pedido.html?canal=rappi">🛵 Cargar pedido de Rappi</a>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Mapa de mesas</h2>
+        <p class="lede">Tocá una mesa libre para abrir un pedido nuevo, o una ocupada para ver / agregar a su pedido.</p>
+        <div class="grid grid-mesas" id="mesas-grid">
+          <p class="empty-state">Cargando mesas...</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+    import { requireAuth } from "./js/auth.js";
+
+    const user = await requireAuth(["admin", "cajera", "mesera"]);
+    if (user) cargarMesas();
+
+    async function cargarMesas() {
+      const { data: mesas, error } = await supabase
+        .from("mesas")
+        .select("id, numero, nombre, estado")
+        .order("numero");
+
+      const grid = document.getElementById("mesas-grid");
+      if (error) {
+        grid.innerHTML = `<p class="empty-state">No se pudieron cargar las mesas.</p>`;
+        return;
+      }
+      if (!mesas.length) {
+        grid.innerHTML = `<p class="empty-state">Todavía no hay mesas cargadas. Se agregan desde Administración.</p>`;
+        return;
+      }
+      grid.innerHTML = mesas
+        .map(
+          (m) => `
+        <a class="mesa-tile ${m.estado === "ocupada" ? "ocupada" : ""}" href="pedido.html?canal=mesa&mesaId=${m.id}&numero=${m.numero}">
+          <span class="numero">${m.numero}</span>
+          <span class="badge badge-${m.estado}">${m.estado}</span>
+        </a>`
+        )
+        .join("");
+    }
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>

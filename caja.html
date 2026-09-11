@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Caja — Buffet</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="topbar-mount"></div>
+    <main>
+      <div id="sin-turno" class="panel" hidden>
+        <h2>Abrir turno de caja</h2>
+        <p class="lede">Contá el efectivo con el que arrancás antes de cobrar el primer pedido.</p>
+        <div class="field">
+          <label for="monto-apertura">Monto inicial en caja</label>
+          <input type="number" id="monto-apertura" min="0" step="0.01" value="0" />
+        </div>
+        <button class="btn btn-primary" id="btn-abrir-turno">Abrir turno</button>
+      </div>
+
+      <div id="con-turno" hidden>
+        <div class="panel">
+          <h2>Tu turno</h2>
+          <div class="stat-row">
+            <div class="stat-tile"><div class="label">Apertura</div><div class="value mono tabular" id="stat-apertura">$0</div></div>
+            <div class="stat-tile"><div class="label">Efectivo cobrado</div><div class="value mono tabular" id="stat-efectivo">$0</div></div>
+            <div class="stat-tile"><div class="label">Tarjeta</div><div class="value mono tabular" id="stat-tarjeta">$0</div></div>
+            <div class="stat-tile"><div class="label">Transferencia</div><div class="value mono tabular" id="stat-transferencia">$0</div></div>
+            <div class="stat-tile"><div class="label">Cta. corriente</div><div class="value mono tabular" id="stat-cc">$0</div></div>
+          </div>
+          <button class="btn btn-danger" id="btn-cerrar-turno">Cerrar turno</button>
+        </div>
+
+        <div class="panel">
+          <h2>Pedidos para cobrar</h2>
+          <p class="lede">Incluye mostrador, mesas, teléfono/WhatsApp y Rappi.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Origen</th><th>Estado</th><th>Total</th><th></th></tr></thead>
+              <tbody id="pedidos-cobrar"><tr><td colspan="4" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal: cobrar -->
+  <div class="modal-backdrop" id="modal-cobrar" hidden>
+    <div class="modal">
+      <h3>Cobrar pedido</h3>
+      <p class="mono tabular" id="cobrar-total" style="font-size:1.3rem; margin-bottom:14px;"></p>
+      <div class="field">
+        <label for="cobrar-medio">Medio de pago</label>
+        <select id="cobrar-medio">
+          <option value="efectivo">Efectivo</option>
+          <option value="tarjeta">Tarjeta (posnet)</option>
+          <option value="transferencia">Transferencia / QR</option>
+          <option value="cuenta_corriente">Cuenta corriente de socio</option>
+        </select>
+      </div>
+      <div class="field" id="campo-socio" hidden>
+        <label for="cobrar-socio">Nombre del socio</label>
+        <input type="text" id="cobrar-socio" placeholder="Buscar o escribir nombre" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="cobrar-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="cobrar-confirmar">Confirmar cobro</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: anular -->
+  <div class="modal-backdrop" id="modal-anular" hidden>
+    <div class="modal">
+      <h3>Anular pedido</h3>
+      <div class="field">
+        <label for="anular-motivo">Motivo (obligatorio)</label>
+        <textarea id="anular-motivo" rows="3" placeholder="Ej: pedido duplicado, cliente se arrepintió, error de carga..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="anular-cancelar">Cancelar</button>
+        <button class="btn btn-danger" id="anular-confirmar">Confirmar anulación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: cierre de turno (conteo ciego) -->
+  <div class="modal-backdrop" id="modal-cierre" hidden>
+    <div class="modal">
+      <h3 id="cierre-titulo">Cierre de turno — contá el efectivo</h3>
+      <div id="cierre-paso-1">
+        <p class="lede">Contá el efectivo que hay en la caja ahora, SIN mirar el total del sistema, y escribilo acá.</p>
+        <div class="field">
+          <label for="cierre-declarado">Efectivo contado</label>
+          <input type="number" id="cierre-declarado" min="0" step="0.01" />
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="cierre-cancelar-1">Cancelar</button>
+          <button class="btn btn-primary" id="cierre-comparar">Comparar con el sistema</button>
+        </div>
+      </div>
+      <div id="cierre-paso-2" hidden>
+        <div class="stat-row">
+          <div class="stat-tile"><div class="label">Declarado</div><div class="value mono tabular" id="cierre-v-declarado"></div></div>
+          <div class="stat-tile"><div class="label">Sistema</div><div class="value mono tabular" id="cierre-v-sistema"></div></div>
+          <div class="stat-tile" id="cierre-tile-diff"><div class="label">Diferencia</div><div class="value mono tabular" id="cierre-v-diff"></div></div>
+        </div>
+        <div class="field" id="cierre-campo-notas" hidden>
+          <label for="cierre-notas">Hay una diferencia — ¿alguna explicación? (opcional, pero ayuda)</label>
+          <textarea id="cierre-notas" rows="2"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="cierre-cancelar-2">Cancelar</button>
+          <button class="btn btn-primary" id="cierre-confirmar">Cerrar turno</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+    import { requireAuth, toast } from "./js/auth.js";
+    import { registrarAuditoria } from "./js/audit.js";
+
+    const user = await requireAuth(["admin", "cajera"]);
+    if (!user) throw new Error("sin sesión");
+
+    let turno = null;
+    let pedidoSeleccionado = null; // para el modal de cobro/anulación
+
+    await cargarTurno();
+
+    async function cargarTurno() {
+      const { data } = await supabase
+        .from("turnos_caja")
+        .select("*")
+        .eq("usuario_id", user.id)
+        .eq("estado", "abierto")
+        .order("apertura_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      turno = data;
+      document.getElementById("sin-turno").hidden = !!turno;
+      document.getElementById("con-turno").hidden = !turno;
+      if (turno) {
+        document.getElementById("stat-apertura").textContent = "$" + fmt(turno.monto_apertura);
+        await cargarStats();
+        await cargarPedidosPendientes();
+      }
+    }
+
+    document.getElementById("btn-abrir-turno").addEventListener("click", async () => {
+      const monto = Number(document.getElementById("monto-apertura").value) || 0;
+      const { error } = await supabase.from("turnos_caja").insert({ usuario_id: user.id, monto_apertura: monto });
+      if (error) { toast("No se pudo abrir el turno.", "error"); return; }
+      toast("Turno abierto.");
+      await cargarTurno();
+    });
+
+    async function cargarStats() {
+      const { data: pagos } = await supabase.from("pagos").select("medio, monto").eq("turno_id", turno.id);
+      const totales = { efectivo: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
+      (pagos || []).forEach((p) => { totales[p.medio] = (totales[p.medio] || 0) + Number(p.monto); });
+      document.getElementById("stat-efectivo").textContent = "$" + fmt(totales.efectivo);
+      document.getElementById("stat-tarjeta").textContent = "$" + fmt(totales.tarjeta);
+      document.getElementById("stat-transferencia").textContent = "$" + fmt(totales.transferencia);
+      document.getElementById("stat-cc").textContent = "$" + fmt(totales.cuenta_corriente);
+    }
+
+    async function cargarPedidosPendientes() {
+      const { data: pedidos, error } = await supabase
+        .from("pedidos")
+        .select("id, canal, cliente_nombre, estado, mesas(numero), pedido_items(cantidad, precio_unitario, descuento, anulado)")
+        .not("estado", "in", "(cobrado,anulado)")
+        .order("creado_at", { ascending: true });
+
+      const tbody = document.getElementById("pedidos-cobrar");
+      if (error) { tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No se pudo cargar.</td></tr>`; return; }
+      if (!pedidos.length) { tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No hay pedidos pendientes de cobro.</td></tr>`; return; }
+
+      tbody.innerHTML = pedidos
+        .map((p) => {
+          const origen = p.canal === "mesa" && p.mesas ? `Mesa ${p.mesas.numero}` : (p.cliente_nombre ? `${p.canal} · ${escapeHtml(p.cliente_nombre)}` : p.canal);
+          const total = (p.pedido_items || []).filter((it) => !it.anulado).reduce((acc, it) => acc + it.cantidad * it.precio_unitario - it.descuento, 0);
+          return `
+          <tr>
+            <td>${origen}</td>
+            <td><span class="badge badge-${p.estado}">${p.estado.replace("_", " ")}</span></td>
+            <td class="mono tabular">$${fmt(total)}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-sm btn-olive" data-cobrar="${p.id}" data-total="${total}">Cobrar</button>
+              <button class="btn btn-sm btn-danger" data-anular="${p.id}">Anular</button>
+            </td>
+          </tr>`;
+        })
+        .join("");
+
+      tbody.querySelectorAll("[data-cobrar]").forEach((b) =>
+        b.addEventListener("click", () => abrirModalCobro(b.getAttribute("data-cobrar"), Number(b.getAttribute("data-total"))))
+      );
+      tbody.querySelectorAll("[data-anular]").forEach((b) =>
+        b.addEventListener("click", () => abrirModalAnular(b.getAttribute("data-anular")))
+      );
+    }
+
+    // ---- Cobro ----
+    function abrirModalCobro(pedidoId, total) {
+      pedidoSeleccionado = { id: pedidoId, total };
+      document.getElementById("cobrar-total").textContent = "Total: $" + fmt(total);
+      document.getElementById("cobrar-medio").value = "efectivo";
+      document.getElementById("campo-socio").hidden = true;
+      document.getElementById("modal-cobrar").hidden = false;
+    }
+    document.getElementById("cobrar-medio").addEventListener("change", (e) => {
+      document.getElementById("campo-socio").hidden = e.target.value !== "cuenta_corriente";
+    });
+    document.getElementById("cobrar-cancelar").addEventListener("click", () => (document.getElementById("modal-cobrar").hidden = true));
+
+    document.getElementById("cobrar-confirmar").addEventListener("click", async () => {
+      const medio = document.getElementById("cobrar-medio").value;
+      let cuentaId = null;
+
+      if (medio === "cuenta_corriente") {
+        const nombre = document.getElementById("cobrar-socio").value.trim();
+        if (!nombre) { toast("Escribí el nombre del socio.", "error"); return; }
+        let { data: cuenta } = await supabase.from("cuentas_corrientes").select("id, saldo").eq("socio_nombre", nombre).maybeSingle();
+        if (!cuenta) {
+          const { data: nueva, error } = await supabase.from("cuentas_corrientes").insert({ socio_nombre: nombre }).select().single();
+          if (error) { toast("No se pudo crear la cuenta del socio.", "error"); return; }
+          cuenta = nueva;
+        }
+        cuentaId = cuenta.id;
+        await supabase.from("movimientos_cuenta_corriente").insert({ cuenta_id: cuentaId, pedido_id: pedidoSeleccionado.id, monto: pedidoSeleccionado.total, tipo: "cargo" });
+        await supabase.from("cuentas_corrientes").update({ saldo: Number(cuenta.saldo) + pedidoSeleccionado.total }).eq("id", cuentaId);
+      }
+
+      const { error: errPago } = await supabase.from("pagos").insert({
+        pedido_id: pedidoSeleccionado.id,
+        turno_id: turno.id,
+        medio,
+        monto: pedidoSeleccionado.total,
+        cuenta_corriente_id: cuentaId,
+        usuario_id: user.id,
+      });
+      if (errPago) { toast("No se pudo registrar el cobro.", "error"); return; }
+
+      await supabase.from("pedidos").update({ estado: "cobrado", turno_id: turno.id, actualizado_at: new Date().toISOString() }).eq("id", pedidoSeleccionado.id);
+
+      // Si era una mesa, la liberamos.
+      await supabase.from("mesas").update({ estado: "libre", pedido_actual_id: null }).eq("pedido_actual_id", pedidoSeleccionado.id);
+
+      document.getElementById("modal-cobrar").hidden = true;
+      toast("Cobro registrado.");
+      await cargarStats();
+      await cargarPedidosPendientes();
+    });
+
+    // ---- Anulación ----
+    function abrirModalAnular(pedidoId) {
+      pedidoSeleccionado = { id: pedidoId };
+      document.getElementById("anular-motivo").value = "";
+      document.getElementById("modal-anular").hidden = false;
+    }
+    document.getElementById("anular-cancelar").addEventListener("click", () => (document.getElementById("modal-anular").hidden = true));
+    document.getElementById("anular-confirmar").addEventListener("click", async () => {
+      const motivo = document.getElementById("anular-motivo").value.trim();
+      if (!motivo) { toast("El motivo es obligatorio.", "error"); return; }
+      await supabase.from("pedidos").update({ estado: "anulado", motivo_anulacion: motivo, actualizado_at: new Date().toISOString() }).eq("id", pedidoSeleccionado.id);
+      await supabase.from("mesas").update({ estado: "libre", pedido_actual_id: null }).eq("pedido_actual_id", pedidoSeleccionado.id);
+      await registrarAuditoria(user.id, "anular_pedido", { pedido_id: pedidoSeleccionado.id, motivo });
+      document.getElementById("modal-anular").hidden = true;
+      toast("Pedido anulado.");
+      await cargarPedidosPendientes();
+    });
+
+    // ---- Cierre de turno (conteo ciego) ----
+    document.getElementById("btn-cerrar-turno").addEventListener("click", () => {
+      document.getElementById("cierre-declarado").value = "";
+      document.getElementById("cierre-paso-1").hidden = false;
+      document.getElementById("cierre-paso-2").hidden = true;
+      document.getElementById("modal-cierre").hidden = false;
+    });
+    document.getElementById("cierre-cancelar-1").addEventListener("click", () => (document.getElementById("modal-cierre").hidden = true));
+    document.getElementById("cierre-cancelar-2").addEventListener("click", () => (document.getElementById("modal-cierre").hidden = true));
+
+    let cierreDatos = null;
+    document.getElementById("cierre-comparar").addEventListener("click", async () => {
+      const declarado = Number(document.getElementById("cierre-declarado").value);
+      if (isNaN(declarado)) { toast("Ingresá un número.", "error"); return; }
+
+      const { data: pagos } = await supabase.from("pagos").select("medio, monto").eq("turno_id", turno.id).eq("medio", "efectivo");
+      const sistemaVentas = (pagos || []).reduce((acc, p) => acc + Number(p.monto), 0);
+      const sistemaEsperado = Number(turno.monto_apertura) + sistemaVentas;
+      const diferencia = Number((declarado - sistemaEsperado).toFixed(2));
+
+      cierreDatos = { declarado, sistemaEsperado, diferencia };
+
+      document.getElementById("cierre-v-declarado").textContent = "$" + fmt(declarado);
+      document.getElementById("cierre-v-sistema").textContent = "$" + fmt(sistemaEsperado);
+      document.getElementById("cierre-v-diff").textContent = (diferencia >= 0 ? "+" : "") + "$" + fmt(diferencia);
+      const tile = document.getElementById("cierre-tile-diff");
+      tile.classList.remove("diff-pos", "diff-neg");
+      if (diferencia !== 0) tile.classList.add(diferencia > 0 ? "diff-pos" : "diff-neg");
+      document.getElementById("cierre-campo-notas").hidden = diferencia === 0;
+
+      document.getElementById("cierre-paso-1").hidden = true;
+      document.getElementById("cierre-paso-2").hidden = false;
+    });
+
+    document.getElementById("cierre-confirmar").addEventListener("click", async () => {
+      const notas = document.getElementById("cierre-notas").value.trim() || null;
+      await supabase
+        .from("turnos_caja")
+        .update({
+          cierre_at: new Date().toISOString(),
+          monto_declarado_efectivo: cierreDatos.declarado,
+          monto_sistema_efectivo: cierreDatos.sistemaEsperado,
+          diferencia: cierreDatos.diferencia,
+          estado: "cerrado",
+          notas_cierre: notas,
+        })
+        .eq("id", turno.id);
+
+      if (cierreDatos.diferencia !== 0) {
+        await registrarAuditoria(user.id, "cerrar_turno_con_diferencia", { turno_id: turno.id, ...cierreDatos, notas });
+      }
+
+      document.getElementById("modal-cierre").hidden = true;
+      toast("Turno cerrado.");
+      await cargarTurno();
+    });
+
+    function fmt(n) { return Number(n).toLocaleString("es-AR", { minimumFractionDigits: 0 }); }
+    function escapeHtml(str) { const d = document.createElement("div"); d.textContent = str ?? ""; return d.innerHTML; }
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>

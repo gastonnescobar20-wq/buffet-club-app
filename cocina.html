@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cocina — Buffet</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .comanda{background:var(--bg); border:1px solid var(--line); border-radius:var(--radius); padding:14px; display:flex; flex-direction:column; gap:10px;}
+    .comanda-head{display:flex; justify-content:space-between; align-items:baseline;}
+    .comanda-head .canal{font-weight:600;}
+    .comanda-head .hora{font-family:'IBM Plex Mono',monospace; font-size:.75rem; color:var(--ink-soft);}
+    .comanda ul{margin:0; padding-left:18px; font-size:.92rem;}
+    .comanda ul li{margin-bottom:3px;}
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div id="topbar-mount"></div>
+    <main>
+      <div class="panel">
+        <h2>Pantalla de cocina</h2>
+        <p class="lede">Se actualiza sola apenas entra un pedido nuevo. Tocá el botón para avanzar el estado.</p>
+        <div class="grid grid-2" id="comandas">
+          <p class="empty-state">Cargando pedidos...</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+    import { requireAuth } from "./js/auth.js";
+
+    const user = await requireAuth(["admin", "cajera", "mesera"]);
+    if (!user) throw new Error("sin sesión");
+
+    const SIGUIENTE_ESTADO = { en_preparacion: "listo", listo: "entregado" };
+    const ETIQUETA_BOTON = { en_preparacion: "Marcar listo", listo: "Marcar entregado" };
+    const ETIQUETA_CANAL = { mostrador: "Mostrador", mesa: "Mesa", telefono: "Teléfono", whatsapp: "WhatsApp", rappi: "Rappi" };
+
+    async function cargarComandas() {
+      const { data: pedidos, error } = await supabase
+        .from("pedidos")
+        .select("id, canal, mesa_id, cliente_nombre, estado, creado_at, mesas(numero), pedido_items(nombre_producto, cantidad, anulado)")
+        .in("estado", ["en_preparacion", "listo"])
+        .order("creado_at", { ascending: true });
+
+      const cont = document.getElementById("comandas");
+      if (error) {
+        cont.innerHTML = `<p class="empty-state">No se pudo cargar la cocina.</p>`;
+        return;
+      }
+      if (!pedidos.length) {
+        cont.innerHTML = `<p class="empty-state">No hay pedidos pendientes. 🎉</p>`;
+        return;
+      }
+      cont.innerHTML = pedidos
+        .map((p) => {
+          const etiquetaCanal = p.canal === "mesa" && p.mesas ? `Mesa ${p.mesas.numero}` : ETIQUETA_CANAL[p.canal] || p.canal;
+          const items = (p.pedido_items || []).filter((it) => !it.anulado);
+          return `
+          <div class="comanda">
+            <div class="comanda-head">
+              <span class="canal">${etiquetaCanal}${p.cliente_nombre ? " · " + escapeHtml(p.cliente_nombre) : ""}</span>
+              <span class="hora">${new Date(p.creado_at).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+            <span class="badge badge-${p.estado}">${p.estado.replace("_", " ")}</span>
+            <ul>${items.map((it) => `<li>${it.cantidad} × ${escapeHtml(it.nombre_producto)}</li>`).join("")}</ul>
+            ${SIGUIENTE_ESTADO[p.estado] ? `<button class="btn btn-olive" data-avanzar="${p.id}" data-hacia="${SIGUIENTE_ESTADO[p.estado]}">${ETIQUETA_BOTON[p.estado]}</button>` : ""}
+          </div>`;
+        })
+        .join("");
+
+      cont.querySelectorAll("[data-avanzar]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          await supabase
+            .from("pedidos")
+            .update({ estado: btn.getAttribute("data-hacia"), actualizado_at: new Date().toISOString() })
+            .eq("id", btn.getAttribute("data-avanzar"));
+          cargarComandas();
+        });
+      });
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str ?? "";
+      return div.innerHTML;
+    }
+
+    await cargarComandas();
+
+    // Tiempo real: apenas cambia algo en pedidos, se refresca la pantalla.
+    supabase
+      .channel("cocina-pedidos")
+      .on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, cargarComandas)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pedido_items" }, cargarComandas)
+      .subscribe();
+
+    // Respaldo por si el realtime no llega a conectar (wifi débil, etc.)
+    setInterval(cargarComandas, 20000);
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>

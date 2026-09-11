@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Administración — Buffet</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="topbar-mount"></div>
+    <main>
+      <div class="panel">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="productos">Productos</button>
+          <button class="tab-btn" data-tab="mesas">Mesas</button>
+          <button class="tab-btn" data-tab="usuarios">Usuarios</button>
+        </div>
+
+        <!-- PRODUCTOS -->
+        <div class="tab-panel" id="tab-productos">
+          <h2>Menú</h2>
+          <p class="lede">Lo que cargues acá aparece al toque en la pantalla de pedidos.</p>
+          <form id="form-producto" class="grid grid-2" style="align-items:end; margin-bottom:18px;">
+            <input type="hidden" id="prod-id" />
+            <div class="field"><label>Nombre</label><input type="text" id="prod-nombre" required /></div>
+            <div class="field"><label>Categoría</label><input type="text" id="prod-categoria" placeholder="Parrilla, Pastas, Bebidas..." required /></div>
+            <div class="field"><label>Precio</label><input type="number" id="prod-precio" min="0" step="0.01" required /></div>
+            <div style="display:flex; gap:8px;">
+              <button type="submit" class="btn btn-primary" id="prod-submit">Agregar producto</button>
+              <button type="button" class="btn btn-ghost" id="prod-cancelar" hidden>Cancelar</button>
+            </div>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Estado</th><th></th></tr></thead>
+              <tbody id="lista-productos"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- MESAS -->
+        <div class="tab-panel" id="tab-mesas" hidden>
+          <h2>Mesas</h2>
+          <p class="lede">Numerá las mesas tal cual están en el salón.</p>
+          <form id="form-mesa" class="field-row" style="align-items:end; margin-bottom:18px;">
+            <div class="field"><label>Número de mesa</label><input type="number" id="mesa-numero" min="1" required /></div>
+            <div><button type="submit" class="btn btn-primary">Agregar mesa</button></div>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Número</th><th>Estado</th><th></th></tr></thead>
+              <tbody id="lista-mesas"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- USUARIOS -->
+        <div class="tab-panel" id="tab-usuarios" hidden>
+          <h2>Usuarios y roles</h2>
+          <p class="lede">Creá acá el login (email + contraseña) de cada persona y asignale su rol.</p>
+          <form id="form-usuario" class="grid grid-2" style="align-items:end; margin-bottom:18px;">
+            <div class="field"><label>Nombre</label><input type="text" id="user-nombre" required /></div>
+            <div class="field">
+              <label>Rol</label>
+              <select id="user-rol">
+                <option value="mesera">Mesera</option>
+                <option value="cajera">Cajera</option>
+                <option value="admin">Administrador / Dueño</option>
+              </select>
+            </div>
+            <div class="field"><label>Email</label><input type="email" id="user-email" required autocomplete="off" /></div>
+            <div class="field"><label>Contraseña</label><input type="password" id="user-password" minlength="6" required autocomplete="new-password" /></div>
+            <div><button type="submit" class="btn btn-primary" id="user-submit">Crear usuario</button></div>
+          </form>
+          <p id="user-error" class="sub" style="color:var(--danger); display:none; margin-bottom:18px;"></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nombre</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+              <tbody id="lista-usuarios"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+    import { requireAuth, toast } from "./js/auth.js";
+
+    const user = await requireAuth(["admin"]);
+    if (!user) throw new Error("sin sesión");
+
+    // ---- Tabs ----
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach((p) => (p.hidden = true));
+        btn.classList.add("active");
+        document.getElementById("tab-" + btn.dataset.tab).hidden = false;
+      });
+    });
+
+    // ---- Productos ----
+    async function cargarProductos() {
+      const { data } = await supabase.from("productos").select("*").order("categoria").order("nombre");
+      document.getElementById("lista-productos").innerHTML = (data || [])
+        .map(
+          (p) => `
+        <tr>
+          <td>${p.nombre}</td><td>${p.categoria}</td><td class="mono tabular">$${fmt(p.precio)}</td>
+          <td><span class="badge ${p.activo ? "badge-libre" : "badge-anulado"}">${p.activo ? "activo" : "inactivo"}</span></td>
+          <td>
+            <button class="btn btn-sm" data-editar-prod="${p.id}">Editar</button>
+            <button class="btn btn-sm btn-danger" data-toggle-prod="${p.id}" data-activo="${p.activo}">${p.activo ? "Desactivar" : "Activar"}</button>
+          </td>
+        </tr>`
+        )
+        .join("");
+
+      document.querySelectorAll("[data-editar-prod]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const row = (data || []).find((p) => p.id === b.getAttribute("data-editar-prod"));
+          document.getElementById("prod-id").value = row.id;
+          document.getElementById("prod-nombre").value = row.nombre;
+          document.getElementById("prod-categoria").value = row.categoria;
+          document.getElementById("prod-precio").value = row.precio;
+          document.getElementById("prod-submit").textContent = "Guardar cambios";
+          document.getElementById("prod-cancelar").hidden = false;
+        })
+      );
+      document.querySelectorAll("[data-toggle-prod]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          const activo = b.getAttribute("data-activo") === "true";
+          await supabase.from("productos").update({ activo: !activo }).eq("id", b.getAttribute("data-toggle-prod"));
+          cargarProductos();
+        })
+      );
+    }
+    document.getElementById("prod-cancelar").addEventListener("click", resetFormProducto);
+    function resetFormProducto() {
+      document.getElementById("form-producto").reset();
+      document.getElementById("prod-id").value = "";
+      document.getElementById("prod-submit").textContent = "Agregar producto";
+      document.getElementById("prod-cancelar").hidden = true;
+    }
+    document.getElementById("form-producto").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = document.getElementById("prod-id").value;
+      const payload = {
+        nombre: document.getElementById("prod-nombre").value.trim(),
+        categoria: document.getElementById("prod-categoria").value.trim(),
+        precio: Number(document.getElementById("prod-precio").value),
+      };
+      const { error } = id
+        ? await supabase.from("productos").update(payload).eq("id", id)
+        : await supabase.from("productos").insert(payload);
+      if (error) { toast("No se pudo guardar el producto.", "error"); return; }
+      toast("Producto guardado.");
+      resetFormProducto();
+      cargarProductos();
+    });
+
+    // ---- Mesas ----
+    async function cargarMesas() {
+      const { data } = await supabase.from("mesas").select("*").order("numero");
+      document.getElementById("lista-mesas").innerHTML = (data || [])
+        .map(
+          (m) => `
+        <tr>
+          <td class="mono">${m.numero}</td>
+          <td><span class="badge badge-${m.estado}">${m.estado}</span></td>
+          <td><button class="btn btn-sm btn-danger" data-borrar-mesa="${m.id}">Quitar</button></td>
+        </tr>`
+        )
+        .join("");
+      document.querySelectorAll("[data-borrar-mesa]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          await supabase.from("mesas").delete().eq("id", b.getAttribute("data-borrar-mesa"));
+          cargarMesas();
+        })
+      );
+    }
+    document.getElementById("form-mesa").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const numero = Number(document.getElementById("mesa-numero").value);
+      const { error } = await supabase.from("mesas").insert({ numero, nombre: "Mesa " + numero });
+      if (error) { toast("No se pudo agregar (¿ya existe ese número?).", "error"); return; }
+      toast("Mesa agregada.");
+      document.getElementById("form-mesa").reset();
+      cargarMesas();
+    });
+
+    // ---- Usuarios ----
+    async function cargarUsuarios() {
+      const { data } = await supabase.from("usuarios").select("*").order("creado_at");
+      document.getElementById("lista-usuarios").innerHTML = (data || [])
+        .map(
+          (u) => `
+        <tr>
+          <td>${u.nombre}</td><td>${u.rol}</td>
+          <td><span class="badge ${u.activo ? "badge-libre" : "badge-anulado"}">${u.activo ? "activo" : "inactivo"}</span></td>
+          <td><button class="btn btn-sm btn-danger" data-toggle-user="${u.id}" data-activo="${u.activo}">${u.activo ? "Desactivar" : "Activar"}</button></td>
+        </tr>`
+        )
+        .join("");
+      document.querySelectorAll("[data-toggle-user]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          const activo = b.getAttribute("data-activo") === "true";
+          await supabase.from("usuarios").update({ activo: !activo }).eq("id", b.getAttribute("data-toggle-user"));
+          cargarUsuarios();
+        })
+      );
+    }
+    document.getElementById("form-usuario").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById("user-error");
+      const submitBtn = document.getElementById("user-submit");
+      errorEl.style.display = "none";
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Creando...";
+
+      const payload = {
+        nombre: document.getElementById("user-nombre").value.trim(),
+        rol: document.getElementById("user-rol").value,
+        email: document.getElementById("user-email").value.trim(),
+        password: document.getElementById("user-password").value,
+      };
+      const { data, error } = await supabase.functions.invoke("crear-usuario", { body: payload });
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Crear usuario";
+
+      if (error || data?.error) {
+        errorEl.textContent = data?.error || "No se pudo crear el usuario.";
+        errorEl.style.display = "block";
+        return;
+      }
+      toast("Usuario creado.");
+      document.getElementById("form-usuario").reset();
+      cargarUsuarios();
+    });
+
+    function fmt(n) { return Number(n).toLocaleString("es-AR", { minimumFractionDigits: 0 }); }
+
+    await Promise.all([cargarProductos(), cargarMesas(), cargarUsuarios()]);
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>

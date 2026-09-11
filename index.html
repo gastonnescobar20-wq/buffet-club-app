@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ingresar — Buffet</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>🥩 Buffet del club</h1>
+      <p class="sub">Ingresá con el usuario que te dio el administrador.</p>
+      <form id="form-login">
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" required autocomplete="username" />
+        </div>
+        <div class="field">
+          <label for="password">Contraseña</label>
+          <input type="password" id="password" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="btn-submit">Ingresar</button>
+      </form>
+      <p id="login-error" class="sub" style="color:var(--danger); display:none; margin-top:14px;"></p>
+      <p class="sub" style="margin-top:18px;"><a href="setup.html">¿Primera vez? Configurar la cuenta del dueño</a></p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+    import { getCurrentUser } from "./js/auth.js";
+
+    // Si ya hay una sesión activa y válida, no mostramos el login de nuevo.
+    getCurrentUser().then((user) => {
+      if (user) window.location.href = "mesas.html";
+    });
+
+    const form = document.getElementById("form-login");
+    const errorEl = document.getElementById("login-error");
+    const btn = document.getElementById("btn-submit");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorEl.style.display = "none";
+      btn.disabled = true;
+      btn.textContent = "Ingresando...";
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        errorEl.textContent = "No pudimos ingresar: revisá el email y la contraseña.";
+        errorEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Ingresar";
+        return;
+      }
+
+      const user = await getCurrentUser();
+      if (!user) {
+        errorEl.textContent = "Tu usuario existe en el login pero no tiene un perfil activo cargado. Pedile al administrador que te dé de alta en la pantalla de Administración.";
+        errorEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Ingresar";
+        return;
+      }
+      window.location.href = "mesas.html";
+    });
+  </script>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>

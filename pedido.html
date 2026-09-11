@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Armar pedido — Buffet</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="topbar-mount"></div>
+    <main>
+      <div class="panel">
+        <h2 id="titulo-canal">Nuevo pedido</h2>
+        <p class="lede" id="sub-canal"></p>
+
+        <div class="field" id="campo-cliente" hidden>
+          <label for="cliente-nombre">Nombre para el pedido</label>
+          <input type="text" id="cliente-nombre" placeholder="Ej: Marta (retira en 20 min)" />
+        </div>
+
+        <div id="pedido-existente" hidden class="field">
+          <label>Ya pedido en esta mesa</label>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th>Cant.</th><th>Subtotal</th></tr></thead>
+              <tbody id="items-existentes"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="panel">
+          <h2>Menú</h2>
+          <div id="menu-lista"><p class="empty-state">Cargando menú...</p></div>
+        </div>
+
+        <div class="panel">
+          <h2>Este pedido</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th>Cant.</th><th></th><th>Subtotal</th></tr></thead>
+              <tbody id="carrito-lista">
+                <tr><td colspan="4" class="empty-state">Todavía no agregaste nada</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="text-align:right; margin-top:10px;">
+            Total: <b class="mono tabular" id="carrito-total">$0</b>
+          </p>
+          <button class="btn btn-primary btn-block" id="btn-confirmar" disabled>Confirmar pedido</button>
+          <a href="mesas.html" class="btn btn-ghost btn-block">Cancelar y volver</a>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+    import { requireAuth, toast } from "./js/auth.js";
+    import { encolarPedido, encolarItemsExtra } from "./js/offlineQueue.js";
+
+    const user = await requireAuth(["admin", "cajera", "mesera"]);
+    if (!user) throw new Error("sin sesión");
+
+    const params = new URLSearchParams(window.location.search);
+    const canal = params.get("canal") || "mostrador";
+    const mesaId = params.get("mesaId");
+    const numeroMesa = params.get("numero");
+
+    const NOMBRES_CANAL = {
+      mostrador: "Pedido de mostrador",
+      telefono: "Pedido por teléfono",
+      whatsapp: "Pedido por WhatsApp",
+      rappi: "Pedido de Rappi",
+      mesa: `Mesa ${numeroMesa ?? ""}`,
+    };
+    document.getElementById("titulo-canal").textContent = NOMBRES_CANAL[canal] || "Nuevo pedido";
+
+    if (["telefono", "whatsapp", "rappi"].includes(canal)) {
+      document.getElementById("campo-cliente").hidden = false;
+      document.getElementById("sub-canal").textContent = "Cargá lo que pidieron y, si hace falta, un nombre para identificarlo.";
+    } else if (canal === "mostrador") {
+      document.getElementById("sub-canal").textContent = "Se cobra al momento en el mostrador.";
+    } else if (canal === "mesa") {
+      document.getElementById("sub-canal").textContent = "El pedido se manda a la pantalla de cocina apenas lo confirmás.";
+    }
+
+    let productos = [];
+    let carrito = []; // { producto_id, nombre_producto, precio_unitario, cantidad }
+    let pedidoExistente = null; // si la mesa ya tenía un pedido abierto
+
+    await cargarMenu();
+    if (canal === "mesa" && mesaId) await revisarPedidoDeMesa();
+    render();
+
+    async function cargarMenu() {
+      const { data, error } = await supabase
+        .from("productos")
+        .select("id, nombre, categoria, precio")
+        .eq("activo", true)
+        .order("categoria")
+        .order("nombre");
+      const cont = document.getElementById("menu-lista");
+      if (error || !data?.length) {
+        cont.innerHTML = `<p class="empty-state">No hay productos cargados todavía. Se cargan desde Administración.</p>`;
+        return;
+      }
+      productos = data;
+      const categorias = [...new Set(data.map((p) => p.categoria))];
+      cont.innerHTML = categorias
+        .map(
+          (cat) => `
+        <p class="mono" style="font-size:.72rem; text-transform:uppercase; color:var(--ink-soft); margin:14px 0 8px;">${cat}</p>
+        ${data
+          .filter((p) => p.categoria === cat)
+          .map(
+            (p) => `
+          <div style="display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--line);">
+            <span style="flex:1;">${p.nombre}</span>
+            <span class="mono tabular" style="color:var(--ink-soft);">$${formatoMoneda(p.precio)}</span>
+            <button class="btn btn-sm" data-agregar="${p.id}">+ Agregar</button>
+          </div>`
+          )
+          .join("")}
+      `
+        )
+        .join("");
+
+      cont.querySelectorAll("[data-agregar]").forEach((btn) => {
+        btn.addEventListener("click", () => agregarAlCarrito(btn.getAttribute("data-agregar")));
+      });
+    }
+
+    function agregarAlCarrito(productoId) {
+      const p = productos.find((x) => x.id === productoId);
+      if (!p) return;
+      const existente = carrito.find((it) => it.producto_id === productoId);
+      if (existente) existente.cantidad += 1;
+      else carrito.push({ producto_id: p.id, nombre_producto: p.nombre, precio_unitario: p.precio, cantidad: 1 });
+      render();
+    }
+
+    function cambiarCantidad(productoId, delta) {
+      const it = carrito.find((x) => x.producto_id === productoId);
+      if (!it) return;
+      it.cantidad += delta;
+      if (it.cantidad <= 0) carrito = carrito.filter((x) => x.producto_id !== productoId);
+      render();
+    }
+
+    async function revisarPedidoDeMesa() {
+      const { data: mesa } = await supabase.from("mesas").select("pedido_actual_id").eq("id", mesaId).single();
+      if (!mesa?.pedido_actual_id) return;
+      const { data: pedido } = await supabase
+        .from("pedidos")
+        .select("id, estado")
+        .eq("id", mesa.pedido_actual_id)
+        .single();
+      if (!pedido || ["cobrado", "anulado"].includes(pedido.estado)) return;
+
+      pedidoExistente = pedido;
+      const { data: items } = await supabase
+        .from("pedido_items")
+        .select("nombre_producto, cantidad, precio_unitario, anulado")
+        .eq("pedido_id", pedido.id)
+        .eq("anulado", false);
+
+      const cont = document.getElementById("pedido-existente");
+      cont.hidden = false;
+      document.getElementById("items-existentes").innerHTML = (items || [])
+        .map(
+          (it) => `<tr><td>${it.nombre_producto}</td><td>${it.cantidad}</td><td class="mono tabular">$${formatoMoneda(it.cantidad * it.precio_unitario)}</td></tr>`
+        )
+        .join("");
+      document.getElementById("sub-canal").textContent = "Esta mesa ya tiene un pedido en curso — lo que agregues abajo se suma a ese pedido.";
+    }
+
+    function render() {
+      const tbody = document.getElementById("carrito-lista");
+      if (!carrito.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">Todavía no agregaste nada</td></tr>`;
+      } else {
+        tbody.innerHTML = carrito
+          .map(
+            (it) => `
+          <tr>
+            <td>${it.nombre_producto}</td>
+            <td class="mono tabular">${it.cantidad}</td>
+            <td>
+              <button class="btn btn-sm btn-ghost" data-menos="${it.producto_id}">−</button>
+              <button class="btn btn-sm btn-ghost" data-mas="${it.producto_id}">+</button>
+            </td>
+            <td class="mono tabular">$${formatoMoneda(it.cantidad * it.precio_unitario)}</td>
+          </tr>`
+          )
+          .join("");
+        tbody.querySelectorAll("[data-mas]").forEach((b) => b.addEventListener("click", () => cambiarCantidad(b.getAttribute("data-mas"), 1)));
+        tbody.querySelectorAll("[data-menos]").forEach((b) => b.addEventListener("click", () => cambiarCantidad(b.getAttribute("data-menos"), -1)));
+      }
+      const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precio_unitario, 0);
+      document.getElementById("carrito-total").textContent = "$" + formatoMoneda(total);
+      document.getElementById("btn-confirmar").disabled = carrito.length === 0;
+    }
+
+    document.getElementById("btn-confirmar").addEventListener("click", confirmarPedido);
+
+    async function confirmarPedido() {
+      const btn = document.getElementById("btn-confirmar");
+      btn.disabled = true;
+      btn.textContent = "Confirmando...";
+
+      const itemsBase = carrito.map((it) => ({
+        producto_id: it.producto_id,
+        nombre_producto: it.nombre_producto,
+        cantidad: it.cantidad,
+        precio_unitario: it.precio_unitario,
+      }));
+
+      try {
+        if (pedidoExistente) {
+          // Se agrega a un pedido de mesa que ya estaba abierto.
+          if (navigator.onLine) {
+            const { error } = await supabase.from("pedido_items").insert(
+              itemsBase.map((it) => ({ ...it, pedido_id: pedidoExistente.id }))
+            );
+            if (error) throw error;
+            await supabase.from("pedidos").update({ estado: "en_preparacion", actualizado_at: new Date().toISOString() }).eq("id", pedidoExistente.id);
+          } else {
+            await encolarItemsExtra(pedidoExistente.id, itemsBase);
+          }
+        } else {
+          const pedidoNuevo = {
+            canal,
+            mesa_id: canal === "mesa" ? mesaId : null,
+            usuario_id: user.id,
+            cliente_nombre: document.getElementById("cliente-nombre")?.value || null,
+            estado: "en_preparacion",
+          };
+          if (navigator.onLine) {
+            const { data: pedidoInsertado, error } = await supabase.from("pedidos").insert(pedidoNuevo).select().single();
+            if (error) throw error;
+            const { error: errItems } = await supabase
+              .from("pedido_items")
+              .insert(itemsBase.map((it) => ({ ...it, pedido_id: pedidoInsertado.id })));
+            if (errItems) throw errItems;
+            if (canal === "mesa") {
+              await supabase.from("mesas").update({ estado: "ocupada", pedido_actual_id: pedidoInsertado.id }).eq("id", mesaId);
+            }
+          } else {
+            await encolarPedido(pedidoNuevo, itemsBase);
+          }
+        }
+
+        toast(navigator.onLine ? "Pedido enviado a cocina." : "Sin conexión: el pedido quedó guardado y se va a enviar solo.");
+        window.location.href = "mesas.html";
+      } catch (e) {
+        console.error(e);
+        toast("No se pudo guardar el pedido. Probá de nuevo.", "error");
+        btn.disabled = false;
+        btn.textContent = "Confirmar pedido";
+      }
+    }
+
+    function formatoMoneda(n) {
+      return Number(n).toLocaleString("es-AR", { minimumFractionDigits: 0 });
+    }
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>

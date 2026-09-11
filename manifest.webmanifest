@@ -1,0 +1,14 @@
+{
+  "name": "Buffet del Club — Gestión",
+  "short_name": "Buffet",
+  "description": "Pedidos, cocina y caja del buffet.",
+  "start_url": "./mesas.html",
+  "display": "standalone",
+  "background_color": "#EEEAE1",
+  "theme_color": "#B54A26",
+  "orientation": "any",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

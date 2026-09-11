@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Configuración inicial — Buffet</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#B54A26" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>🥩 Buffet del club</h1>
+      <p class="sub">Primera vez que se usa el sistema: creá acá la cuenta del dueño.</p>
+      <form id="form-setup">
+        <div class="field">
+          <label for="nombre">Tu nombre</label>
+          <input type="text" id="nombre" required autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" required autocomplete="username" />
+        </div>
+        <div class="field">
+          <label for="password">Contraseña</label>
+          <input type="password" id="password" required minlength="6" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="btn-submit">Crear cuenta del dueño</button>
+      </form>
+      <p id="setup-error" class="sub" style="color:var(--danger); display:none; margin-top:14px;"></p>
+      <p class="sub" style="margin-top:18px;"><a href="index.html">Ya tengo una cuenta — ir a Ingresar</a></p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+
+    const form = document.getElementById("form-setup");
+    const errorEl = document.getElementById("setup-error");
+    const btn = document.getElementById("btn-submit");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorEl.style.display = "none";
+      btn.disabled = true;
+      btn.textContent = "Creando...";
+
+      const nombre = document.getElementById("nombre").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      const { data, error } = await supabase.functions.invoke("crear-usuario", {
+        body: { nombre, email, password, rol: "admin" },
+      });
+
+      if (error || data?.error) {
+        errorEl.textContent = data?.error || "No se pudo crear la cuenta. ¿Ya hay un dueño configurado?";
+        errorEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Crear cuenta del dueño";
+        return;
+      }
+
+      const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+      if (loginError) {
+        // La cuenta se creó igual; si el login automático falla, que entre a mano.
+        window.location.href = "index.html";
+        return;
+      }
+      window.location.href = "mesas.html";
+    });
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>
