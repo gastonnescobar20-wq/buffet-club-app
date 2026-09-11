@@ -121,6 +121,7 @@ create table public.pedido_items (
   motivo_descuento text,
   anulado boolean not null default false,
   motivo_anulacion_item text,
+  listo boolean not null default false, -- para que la cocina tilde ítem por ítem
   creado_at timestamptz not null default now(),
   constraint descuento_necesita_motivo check (descuento = 0 or motivo_descuento is not null),
   constraint anulacion_item_necesita_motivo check (anulado = false or motivo_anulacion_item is not null)
