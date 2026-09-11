@@ -90,15 +90,20 @@ create table public.turnos_caja (
 create table public.pedidos (
   id uuid primary key default gen_random_uuid(),
   numero bigint generated always as identity, -- número de orden corto, para mostrar en cocina
-  canal text not null check (canal in ('mostrador','mesa','telefono','whatsapp','rappi')),
+  canal text not null check (canal in ('mostrador','mesa','telefono','whatsapp','rappi','pedidos_ya','delivery_propio')),
   mesa_id uuid references public.mesas(id),
   usuario_id uuid not null references public.usuarios(id), -- quién lo tomó
   turno_id uuid references public.turnos_caja(id), -- se asigna al cobrar
   estado text not null default 'abierto'
     check (estado in ('abierto','en_preparacion','listo','entregado','cobrado','anulado')),
+  -- pagado es independiente de estado: Rappi/PedidosYa se cobran solos al
+  -- crearse y siguen en preparación en cocina; mostrador/mesa/delivery propio
+  -- se pagan después, en Caja.
+  pagado boolean not null default false,
+  monto_abona numeric(10,2), -- con cuánto dijo que paga el cliente (para calcular vuelto), solo informativo
   notas text,
   motivo_anulacion text,
-  cliente_nombre text, -- para pedidos de teléfono/whatsapp/rappi
+  cliente_nombre text, -- para pedidos de teléfono/whatsapp/rappi/pedidosya/delivery propio
   creado_at timestamptz not null default now(),
   actualizado_at timestamptz not null default now(),
   constraint anulado_necesita_motivo check (estado <> 'anulado' or motivo_anulacion is not null)
@@ -154,7 +159,7 @@ create table public.pagos (
   id uuid primary key default gen_random_uuid(),
   pedido_id uuid not null references public.pedidos(id),
   turno_id uuid references public.turnos_caja(id),
-  medio text not null check (medio in ('efectivo','tarjeta','transferencia','cuenta_corriente')),
+  medio text not null check (medio in ('efectivo','tarjeta','transferencia','cuenta_corriente','plataforma')),
   monto numeric(10,2) not null check (monto >= 0),
   cuenta_corriente_id uuid references public.cuentas_corrientes(id),
   usuario_id uuid not null references public.usuarios(id),
@@ -256,12 +261,33 @@ create policy "productos: solo admin borra" on public.productos
 create policy "pedidos: cualquiera autenticado ve" on public.pedidos
   for select using (auth.role() = 'authenticated');
 create policy "pedidos: cualquiera autenticado crea" on public.pedidos
-  for insert with check (auth.role() = 'authenticated');
+  for insert with check (
+    auth.role() = 'authenticated'
+    and (pagado = false or canal in ('rappi','pedidos_ya'))
+  );
 create policy "pedidos: actualiza segun estado" on public.pedidos
   for update using (auth.role() = 'authenticated')
   with check (
     estado not in ('cobrado','anulado') or public.rol_actual() in ('admin','cajera')
   );
+
+-- Nadie puede tocar "pagado" en una fila ya existente salvo admin/cajera
+-- (evita que alguien se marque un pedido como cobrado sin pasar por caja).
+create or replace function public.proteger_pagado()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.pagado is distinct from old.pagado and public.rol_actual() not in ('admin','cajera') then
+    raise exception 'Solo administración o caja puede cambiar el estado de pago.';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_proteger_pagado
+before update on public.pedidos
+for each row execute function public.proteger_pagado();
 
 -- pedido_items: mismo criterio que pedidos
 create policy "items: cualquiera autenticado ve" on public.pedido_items
@@ -287,8 +313,12 @@ create policy "turnos: propio o admin cierra" on public.turnos_caja
 -- pagos: solo admin/cajera
 create policy "pagos: admin/cajera ven" on public.pagos
   for select using (public.rol_actual() in ('admin','cajera'));
-create policy "pagos: admin/cajera crean" on public.pagos
-  for insert with check (public.rol_actual() in ('admin','cajera'));
+-- "plataforma" (Rappi/PedidosYa) puede insertarlo cualquier autenticado, porque
+-- se registra solo al tomar el pedido, sin pasar por una mesera/cajera en Caja.
+create policy "pagos: admin/cajera crean, o plataforma cualquiera" on public.pagos
+  for insert with check (
+    public.rol_actual() in ('admin','cajera') or medio = 'plataforma'
+  );
 
 -- cuentas corrientes: solo admin/cajera
 create policy "cc: admin/cajera ven" on public.cuentas_corrientes

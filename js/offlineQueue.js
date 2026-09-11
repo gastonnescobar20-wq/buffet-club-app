@@ -102,6 +102,16 @@ export async function sincronizarPendientes(onSync) {
               .update({ estado: "ocupada", pedido_actual_id: pedidoId })
               .eq("id", p.pedido.mesa_id);
           }
+
+          if (p.pedido.pagado) {
+            const total = p.items.reduce((acc, it) => acc + it.cantidad * it.precio_unitario, 0);
+            await supabase.from("pagos").insert({
+              pedido_id: pedidoId,
+              medio: "plataforma",
+              monto: total,
+              usuario_id: p.pedido.usuario_id,
+            });
+          }
         }
 
         const itemsConId = p.items.map((it) => ({ ...it, pedido_id: pedidoId }));

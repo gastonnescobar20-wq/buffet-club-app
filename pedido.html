@@ -24,6 +24,14 @@
           <input type="text" id="cliente-nombre" placeholder="Ej: Marta (retira en 20 min)" />
         </div>
 
+        <div class="field" id="campo-pago" hidden style="max-width:320px;">
+          <label for="monto-abona">¿Con cuánto abona el cliente? (opcional)</label>
+          <input type="number" id="monto-abona" min="0" step="0.01" placeholder="Ej: 10000" />
+          <p id="texto-vuelto" style="color:var(--olive); font-weight:600; min-height:1.2em; margin:6px 0 0;"></p>
+        </div>
+
+        <p id="aviso-plataforma" hidden style="color:var(--olive); font-weight:600;">✅ Este pedido se marca cobrado solo — ya lo paga el cliente en la plataforma.</p>
+
         <div id="pedido-existente" hidden class="field">
           <label>Ya pedido en esta mesa</label>
           <div class="table-wrap">
@@ -79,17 +87,44 @@
       telefono: "Pedido por teléfono",
       whatsapp: "Pedido por WhatsApp",
       rappi: "Pedido de Rappi",
+      pedidos_ya: "Pedido de PedidosYa",
+      delivery_propio: "Delivery propio",
       mesa: `Mesa ${numeroMesa ?? ""}`,
     };
     document.getElementById("titulo-canal").textContent = NOMBRES_CANAL[canal] || "Nuevo pedido";
 
-    if (["telefono", "whatsapp", "rappi"].includes(canal)) {
+    const CANALES_YA_COBRADOS = ["rappi", "pedidos_ya"];
+    const CANALES_CON_CLIENTE = ["telefono", "whatsapp", "rappi", "pedidos_ya", "delivery_propio"];
+    const CANALES_CON_VUELTO = ["mostrador", "telefono", "whatsapp", "delivery_propio"];
+
+    if (CANALES_CON_CLIENTE.includes(canal)) {
       document.getElementById("campo-cliente").hidden = false;
+    }
+    if (CANALES_YA_COBRADOS.includes(canal)) {
+      document.getElementById("aviso-plataforma").hidden = false;
+    }
+    if (CANALES_CON_VUELTO.includes(canal)) {
+      document.getElementById("campo-pago").hidden = false;
+    }
+
+    if (canal === "delivery_propio") {
+      document.getElementById("sub-canal").textContent = "Cargá lo que pidieron, la dirección en el nombre, y con cuánto va a pagar para que el repartidor lleve el vuelto.";
+    } else if (["telefono", "whatsapp"].includes(canal)) {
       document.getElementById("sub-canal").textContent = "Cargá lo que pidieron y, si hace falta, un nombre para identificarlo.";
+    } else if (CANALES_YA_COBRADOS.includes(canal)) {
+      document.getElementById("sub-canal").textContent = "Cargá lo que pidieron — el cobro ya está resuelto por la plataforma.";
     } else if (canal === "mostrador") {
       document.getElementById("sub-canal").textContent = "Se cobra al momento en el mostrador.";
     } else if (canal === "mesa") {
       document.getElementById("sub-canal").textContent = "El pedido se manda a la pantalla de cocina apenas lo confirmás.";
+    }
+
+    document.getElementById("monto-abona").addEventListener("input", actualizarVuelto);
+    function actualizarVuelto() {
+      const abona = Number(document.getElementById("monto-abona").value) || 0;
+      const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precio_unitario, 0);
+      const texto = document.getElementById("texto-vuelto");
+      texto.textContent = abona > 0 ? `Vuelto: $${formatoMoneda(Math.max(abona - total, 0))}` : "";
     }
 
     let productos = [];
@@ -207,6 +242,7 @@
       const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precio_unitario, 0);
       document.getElementById("carrito-total").textContent = "$" + formatoMoneda(total);
       document.getElementById("btn-confirmar").disabled = carrito.length === 0;
+      actualizarVuelto();
     }
 
     document.getElementById("btn-confirmar").addEventListener("click", confirmarPedido);
@@ -223,7 +259,12 @@
         precio_unitario: it.precio_unitario,
       }));
 
+      const montoAbonaInput = document.getElementById("monto-abona").value;
+      const montoAbona = CANALES_CON_VUELTO.includes(canal) && montoAbonaInput !== "" ? Number(montoAbonaInput) : null;
+
       try {
+        let pedidoIdParaTicket = null;
+
         if (pedidoExistente) {
           // Se agrega a un pedido de mesa que ya estaba abierto.
           if (navigator.onLine) {
@@ -232,16 +273,20 @@
             );
             if (error) throw error;
             await supabase.from("pedidos").update({ estado: "en_preparacion", actualizado_at: new Date().toISOString() }).eq("id", pedidoExistente.id);
+            pedidoIdParaTicket = pedidoExistente.id;
           } else {
             await encolarItemsExtra(pedidoExistente.id, itemsBase);
           }
         } else {
+          const yaCobrado = CANALES_YA_COBRADOS.includes(canal);
           const pedidoNuevo = {
             canal,
             mesa_id: canal === "mesa" ? mesaId : null,
             usuario_id: user.id,
             cliente_nombre: document.getElementById("cliente-nombre")?.value || null,
             estado: "en_preparacion",
+            pagado: yaCobrado,
+            monto_abona: montoAbona,
           };
           if (navigator.onLine) {
             const { data: pedidoInsertado, error } = await supabase.from("pedidos").insert(pedidoNuevo).select().single();
@@ -253,9 +298,27 @@
             if (canal === "mesa") {
               await supabase.from("mesas").update({ estado: "ocupada", pedido_actual_id: pedidoInsertado.id }).eq("id", mesaId);
             }
+            if (yaCobrado) {
+              const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precio_unitario, 0);
+              await supabase.from("pagos").insert({
+                pedido_id: pedidoInsertado.id,
+                medio: "plataforma",
+                monto: total,
+                usuario_id: user.id,
+              });
+            }
+            pedidoIdParaTicket = pedidoInsertado.id;
           } else {
             await encolarPedido(pedidoNuevo, itemsBase);
           }
+        }
+
+        if (pedidoIdParaTicket) {
+          // Vamos a la pantalla del tique (imprime sola y desde ahí se vuelve
+          // a Mesas) en vez de abrir una pestaña nueva, que muchos navegadores
+          // bloquean por ser un popup.
+          window.location.href = "ticket.html?pedidoId=" + pedidoIdParaTicket;
+          return;
         }
 
         toast(navigator.onLine ? "Pedido enviado a cocina." : "Sin conexión: el pedido quedó guardado y se va a enviar solo.");

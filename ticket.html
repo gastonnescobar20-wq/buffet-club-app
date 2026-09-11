@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tique — Buffet</title>
+  <style>
+    /* Página angosta pensada para impresora térmica de comanda (58/80mm). */
+    @page { size: 80mm auto; margin: 3mm; }
+    *{box-sizing:border-box;}
+    body{
+      margin:0; background:#e9e9e9; font-family:'Courier New', monospace;
+      color:#000; display:flex; justify-content:center; padding:16px 0;
+    }
+    .tique{
+      background:#fff; width:80mm; padding:10px 12px; font-size:13px; line-height:1.35;
+    }
+    .centro{text-align:center;}
+    .numero{font-size:2.4rem; font-weight:700; text-align:center; margin:4px 0;}
+    hr{border:none; border-top:1px dashed #000; margin:8px 0;}
+    .fila{display:flex; justify-content:space-between; gap:8px;}
+    ul{list-style:none; margin:0; padding:0;}
+    li{margin-bottom:4px;}
+    .total{font-size:1.15rem; font-weight:700;}
+    .acciones{max-width:80mm; margin:14px auto 0; text-align:center;}
+    button{font-size:1rem; padding:10px 18px; cursor:pointer;}
+    .estado{text-align:center; padding:20px;}
+    @media print{
+      body{background:#fff; padding:0;}
+      .acciones{display:none;}
+    }
+  </style>
+</head>
+<body>
+  <div id="contenido"><p class="estado">Cargando...</p></div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+    import { requireAuth } from "./js/auth.js";
+
+    const user = await requireAuth(["admin", "cajera", "mesera"]);
+    if (!user) throw new Error("sin sesión");
+
+    const NOMBRES_CANAL = {
+      mostrador: "Mostrador",
+      telefono: "Teléfono",
+      whatsapp: "WhatsApp",
+      rappi: "Rappi",
+      pedidos_ya: "PedidosYa",
+      delivery_propio: "Delivery propio",
+      mesa: "Mesa",
+    };
+
+    const pedidoId = new URLSearchParams(window.location.search).get("pedidoId");
+    const cont = document.getElementById("contenido");
+    if (!pedidoId) {
+      cont.innerHTML = `<p class="estado">Falta el pedido a imprimir.</p>`;
+      throw new Error("sin pedidoId");
+    }
+
+    const { data: pedido, error } = await supabase
+      .from("pedidos")
+      .select("id, numero, canal, cliente_nombre, creado_at, monto_abona, mesas!pedidos_mesa_id_fkey(numero), pedido_items(nombre_producto, cantidad, precio_unitario, anulado)")
+      .eq("id", pedidoId)
+      .single();
+
+    if (error || !pedido) {
+      cont.innerHTML = `<p class="estado">No se pudo cargar el pedido.</p>`;
+      throw new Error("no se encontró el pedido");
+    }
+
+    const items = (pedido.pedido_items || []).filter((it) => !it.anulado);
+    const total = items.reduce((acc, it) => acc + it.cantidad * it.precio_unitario, 0);
+    const origen = pedido.canal === "mesa" && pedido.mesas
+      ? `Mesa ${pedido.mesas.numero}`
+      : NOMBRES_CANAL[pedido.canal] || pedido.canal;
+
+    const mostrarVuelto = pedido.canal === "delivery_propio" && pedido.monto_abona != null;
+    const vuelto = mostrarVuelto ? Number(pedido.monto_abona) - total : 0;
+
+    cont.innerHTML = `
+      <div class="tique">
+        <p class="centro">🥩 BUFFET DEL CLUB</p>
+        <div class="numero">#${pedido.numero}</div>
+        <p class="centro">${escapeHtml(origen)}${pedido.cliente_nombre ? " · " + escapeHtml(pedido.cliente_nombre) : ""}</p>
+        <p class="centro">${new Date(pedido.creado_at).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}</p>
+        <hr />
+        <ul>${items.map((it) => `<li>${it.cantidad} × ${escapeHtml(it.nombre_producto)}</li>`).join("")}</ul>
+        <hr />
+        <div class="fila total"><span>TOTAL</span><span>$${fmt(total)}</span></div>
+        ${mostrarVuelto ? `
+          <div class="fila"><span>Paga con</span><span>$${fmt(pedido.monto_abona)}</span></div>
+          <div class="fila"><span>Vuelto</span><span>$${fmt(vuelto)}</span></div>
+        ` : ""}
+      </div>
+      <div class="acciones">
+        <button id="btn-imprimir">🖨️ Imprimir de nuevo</button>
+        <button id="btn-volver">← Volver a Mesas</button>
+      </div>
+    `;
+    document.getElementById("btn-imprimir").addEventListener("click", () => window.print());
+    document.getElementById("btn-volver").addEventListener("click", () => (window.location.href = "mesas.html"));
+
+    setTimeout(() => window.print(), 300);
+
+    function fmt(n) { return Number(n).toLocaleString("es-AR", { minimumFractionDigits: 0 }); }
+    function escapeHtml(str) { const d = document.createElement("div"); d.textContent = str ?? ""; return d.innerHTML; }
+  </script>
+</body>
+</html>

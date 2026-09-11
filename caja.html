@@ -40,7 +40,7 @@
 
         <div class="panel">
           <h2>Pedidos para cobrar</h2>
-          <p class="lede">Incluye mostrador, mesas, teléfono/WhatsApp y Rappi.</p>
+          <p class="lede">Mostrador, mesas, teléfono/WhatsApp y delivery propio. Rappi y PedidosYa no aparecen acá — se cobran solos al tomar el pedido.</p>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Origen</th><th>Estado</th><th>Total</th><th></th></tr></thead>
@@ -57,6 +57,7 @@
     <div class="modal">
       <h3>Cobrar pedido</h3>
       <p class="mono tabular" id="cobrar-total" style="font-size:1.3rem; margin-bottom:14px;"></p>
+      <p class="sub" id="cobrar-vuelto-previsto" hidden style="margin-bottom:14px;"></p>
       <div class="field">
         <label for="cobrar-medio">Medio de pago</label>
         <select id="cobrar-medio">
@@ -178,8 +179,9 @@
     async function cargarPedidosPendientes() {
       const { data: pedidos, error } = await supabase
         .from("pedidos")
-        .select("id, canal, cliente_nombre, estado, mesas!pedidos_mesa_id_fkey(numero), pedido_items(cantidad, precio_unitario, descuento, anulado)")
-        .not("estado", "in", "(cobrado,anulado)")
+        .select("id, canal, cliente_nombre, estado, monto_abona, mesas!pedidos_mesa_id_fkey(numero), pedido_items(cantidad, precio_unitario, descuento, anulado)")
+        .eq("pagado", false)
+        .neq("estado", "anulado")
         .order("creado_at", { ascending: true });
 
       const tbody = document.getElementById("pedidos-cobrar");
@@ -196,7 +198,7 @@
             <td><span class="badge badge-${p.estado}">${p.estado.replace("_", " ")}</span></td>
             <td class="mono tabular">$${fmt(total)}</td>
             <td style="white-space:nowrap;">
-              <button class="btn btn-sm btn-olive" data-cobrar="${p.id}" data-total="${total}">Cobrar</button>
+              <button class="btn btn-sm btn-olive" data-cobrar="${p.id}" data-total="${total}" data-abona="${p.monto_abona ?? ""}">Cobrar</button>
               <button class="btn btn-sm btn-danger" data-anular="${p.id}">Anular</button>
             </td>
           </tr>`;
@@ -204,7 +206,9 @@
         .join("");
 
       tbody.querySelectorAll("[data-cobrar]").forEach((b) =>
-        b.addEventListener("click", () => abrirModalCobro(b.getAttribute("data-cobrar"), Number(b.getAttribute("data-total"))))
+        b.addEventListener("click", () =>
+          abrirModalCobro(b.getAttribute("data-cobrar"), Number(b.getAttribute("data-total")), b.getAttribute("data-abona"))
+        )
       );
       tbody.querySelectorAll("[data-anular]").forEach((b) =>
         b.addEventListener("click", () => abrirModalAnular(b.getAttribute("data-anular")))
@@ -212,11 +216,18 @@
     }
 
     // ---- Cobro ----
-    function abrirModalCobro(pedidoId, total) {
+    function abrirModalCobro(pedidoId, total, montoAbona) {
       pedidoSeleccionado = { id: pedidoId, total };
       document.getElementById("cobrar-total").textContent = "Total: $" + fmt(total);
       document.getElementById("cobrar-medio").value = "efectivo";
       document.getElementById("campo-socio").hidden = true;
+      const vueltoEl = document.getElementById("cobrar-vuelto-previsto");
+      if (montoAbona) {
+        vueltoEl.textContent = `El cliente dijo que pagaba con $${fmt(montoAbona)} — vuelto previsto: $${fmt(Math.max(montoAbona - total, 0))}`;
+        vueltoEl.hidden = false;
+      } else {
+        vueltoEl.hidden = true;
+      }
       document.getElementById("modal-cobrar").hidden = false;
     }
     document.getElementById("cobrar-medio").addEventListener("change", (e) => {
@@ -252,7 +263,7 @@
       });
       if (errPago) { toast("No se pudo registrar el cobro.", "error"); return; }
 
-      await supabase.from("pedidos").update({ estado: "cobrado", turno_id: turno.id, actualizado_at: new Date().toISOString() }).eq("id", pedidoSeleccionado.id);
+      await supabase.from("pedidos").update({ estado: "cobrado", pagado: true, turno_id: turno.id, actualizado_at: new Date().toISOString() }).eq("id", pedidoSeleccionado.id);
 
       // Si era una mesa, la liberamos.
       await supabase.from("mesas").update({ estado: "libre", pedido_actual_id: null }).eq("pedido_actual_id", pedidoSeleccionado.id);
