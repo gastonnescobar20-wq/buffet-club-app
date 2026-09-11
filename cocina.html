@@ -47,7 +47,7 @@
     async function cargarComandas() {
       const { data: pedidos, error } = await supabase
         .from("pedidos")
-        .select("id, canal, mesa_id, cliente_nombre, estado, creado_at, mesas(numero), pedido_items(nombre_producto, cantidad, anulado)")
+        .select("id, canal, mesa_id, cliente_nombre, estado, creado_at, mesas!pedidos_mesa_id_fkey(numero), pedido_items(nombre_producto, cantidad, anulado)")
         .in("estado", ["en_preparacion", "listo"])
         .order("creado_at", { ascending: true });
 

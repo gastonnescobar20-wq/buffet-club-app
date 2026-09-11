@@ -178,7 +178,7 @@
     async function cargarPedidosPendientes() {
       const { data: pedidos, error } = await supabase
         .from("pedidos")
-        .select("id, canal, cliente_nombre, estado, mesas(numero), pedido_items(cantidad, precio_unitario, descuento, anulado)")
+        .select("id, canal, cliente_nombre, estado, mesas!pedidos_mesa_id_fkey(numero), pedido_items(cantidad, precio_unitario, descuento, anulado)")
         .not("estado", "in", "(cobrado,anulado)")
         .order("creado_at", { ascending: true });
 
