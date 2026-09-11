@@ -89,6 +89,7 @@ create table public.turnos_caja (
 -- ----------------------------------------------------------------------------
 create table public.pedidos (
   id uuid primary key default gen_random_uuid(),
+  numero bigint generated always as identity, -- número de orden corto, para mostrar en cocina
   canal text not null check (canal in ('mostrador','mesa','telefono','whatsapp','rappi')),
   mesa_id uuid references public.mesas(id),
   usuario_id uuid not null references public.usuarios(id), -- quién lo tomó

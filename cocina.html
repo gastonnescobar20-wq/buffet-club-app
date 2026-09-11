@@ -11,12 +11,25 @@
   <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css" />
   <style>
-    .comanda{background:var(--bg); border:1px solid var(--line); border-radius:var(--radius); padding:14px; display:flex; flex-direction:column; gap:10px;}
-    .comanda-head{display:flex; justify-content:space-between; align-items:baseline;}
-    .comanda-head .canal{font-weight:600;}
-    .comanda-head .hora{font-family:'IBM Plex Mono',monospace; font-size:.75rem; color:var(--ink-soft);}
-    .comanda ul{margin:0; padding-left:18px; font-size:.92rem;}
+    .comanda{background:var(--paper); border:2px solid var(--line); border-radius:var(--radius); padding:16px; display:flex; flex-direction:column; gap:10px;}
+    .comanda-head{display:flex; justify-content:space-between; align-items:flex-start;}
+    .comanda-head .numero{font-family:'IBM Plex Mono',monospace; font-size:2.4rem; font-weight:700; line-height:1; color:var(--ink);}
+    .comanda-head .hora{font-family:'IBM Plex Mono',monospace; font-size:.8rem; color:var(--ink-soft); padding-top:4px;}
+    .comanda-sub{display:flex; flex-wrap:wrap; gap:6px 10px; font-weight:600; font-size:1.05rem;}
+    .comanda-sub .cliente{color:var(--ink-soft); font-weight:500;}
+    .comanda ul{margin:0; padding-left:18px; font-size:.95rem;}
     .comanda ul li{margin-bottom:3px;}
+
+    /* Pedido listo: titila para que no se pase por alto en la cocina */
+    .comanda.listo{border-color:var(--ember); animation:pedido-listo-parpadeo 1.1s ease-in-out infinite;}
+    .comanda.listo .numero{color:var(--ember);}
+    @keyframes pedido-listo-parpadeo{
+      0%, 100% { box-shadow:0 0 0 0 rgba(var(--ember-rgb), .55); }
+      50% { box-shadow:0 0 0 12px rgba(var(--ember-rgb), 0); }
+    }
+    @media (prefers-reduced-motion: reduce){
+      .comanda.listo{animation:none;}
+    }
   </style>
 </head>
 <body>
@@ -47,7 +60,7 @@
     async function cargarComandas() {
       const { data: pedidos, error } = await supabase
         .from("pedidos")
-        .select("id, canal, mesa_id, cliente_nombre, estado, creado_at, mesas!pedidos_mesa_id_fkey(numero), pedido_items(nombre_producto, cantidad, anulado)")
+        .select("id, numero, canal, mesa_id, cliente_nombre, estado, creado_at, mesas!pedidos_mesa_id_fkey(numero), pedido_items(nombre_producto, cantidad, anulado)")
         .in("estado", ["en_preparacion", "listo"])
         .order("creado_at", { ascending: true });
 
@@ -65,10 +78,14 @@
           const etiquetaCanal = p.canal === "mesa" && p.mesas ? `Mesa ${p.mesas.numero}` : ETIQUETA_CANAL[p.canal] || p.canal;
           const items = (p.pedido_items || []).filter((it) => !it.anulado);
           return `
-          <div class="comanda">
+          <div class="comanda ${p.estado === "listo" ? "listo" : ""}">
             <div class="comanda-head">
-              <span class="canal">${etiquetaCanal}${p.cliente_nombre ? " · " + escapeHtml(p.cliente_nombre) : ""}</span>
+              <span class="numero">#${p.numero}</span>
               <span class="hora">${new Date(p.creado_at).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+            <div class="comanda-sub">
+              <span class="canal">${etiquetaCanal}</span>
+              ${p.cliente_nombre ? `<span class="cliente">${escapeHtml(p.cliente_nombre)}</span>` : ""}
             </div>
             <span class="badge badge-${p.estado}">${p.estado.replace("_", " ")}</span>
             <ul>${items.map((it) => `<li>${it.cantidad} × ${escapeHtml(it.nombre_producto)}</li>`).join("")}</ul>
